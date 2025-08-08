@@ -1,0 +1,17 @@
+=== edges.csv ===
+Type: CSV | Size: 86 bytes | Rows: 7
+Headers (2): source, target
+Data Types: 2 object
+Sample Data:
+  Row 1: source: Alice, target: Bob
+  Row 2: source: Alice, target: Carol
+  Row 3: source: Bob, target: Carol
+
+
+==================================================
+ANALYSIS SUMMARY
+==================================================
+Analyzed 1 files (86 bytes, 7 total rows). Types: CSV. 
+Cache hits: 1
+Report saved to: /home/archer/projects/grasper/tmp/f2219115f9/analysis_report.txt
+==================================================
