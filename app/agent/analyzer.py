@@ -510,8 +510,8 @@ def analyze_data(
             if ext in HTML_EXTS:
                 print(f"[DEBUG] Detected HTML file: {p}")
                 try:
-                    from app.agent.html_analyzer import analyze_html
-                    html_result = analyze_html(str(p))
+                    from app.agent.html_analyzer import analyze_html_default
+                    html_result = analyze_html_default(str(p))
                 except Exception as e:
                     html_result = {"error": repr(e)}
                     print(f"[DEBUG] HTML analysis failed for {p}: {e}")
