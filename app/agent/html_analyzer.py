@@ -1,480 +1,318 @@
-import asyncio
-import os
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
-from pydantic import BaseModel, Field
-from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
-from bs4 import BeautifulSoup, Comment, Tag
 import json
+import asyncio
+from typing import Dict, Any, List, Optional
+import logging
+from crawl4ai import AsyncWebCrawler
+from crawl4ai.extraction_strategy import LLMExtractionStrategy
+from crawl4ai.chunking_strategy import RegexChunking
 import re
-import logfire
-from dotenv import load_dotenv
+import os
 
-# Load environment variables
-load_dotenv()
-logfire.configure()
+logger = logging.getLogger(__name__)
 
-# Load API key
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required")
-
-# Pydantic models for structured responses
+# Global crawler instance for reuse
+_crawler_instance = None
 
 
-class HTMLElement(BaseModel):
-    tag: str
-    id: str = ""
-    classes: List[str] = []
-    text_content: str = ""
-    attributes: Dict[str, str] = {}
-    element_type: str = ""  # form, link, heading, content, etc.
+async def get_crawler():
+    """Get or create a global crawler instance"""
+    global _crawler_instance
+    if not _crawler_instance:
+        _crawler_instance = AsyncWebCrawler(verbose=True)
+        await _crawler_instance.astart()
+    return _crawler_instance
 
 
-class WebsiteStructure(BaseModel):
-    title: str = ""
-    description: str = ""
-    headings: List[Dict[str, str]] = []
-    forms: List[Dict[str, Any]] = []
-    links: List[Dict[str, str]] = []
-    images: List[Dict[str, str]] = []
-    main_content: str = ""
-    meta_info: Dict[str, str] = {}
+async def close_crawler():
+    """Close the global crawler instance"""
+    global _crawler_instance
+    if _crawler_instance:
+        await _crawler_instance.aclose()
+        _crawler_instance = None
 
 
-class AnalysisResponse(BaseModel):
-    answer: str = Field(description="Direct answer to the user's question")
-    confidence: float = Field(
-        description="Confidence score between 0-1", ge=0, le=1)
-    relevant_elements: List[str] = Field(
-        description="HTML elements that support this answer")
-    reasoning: str = Field(
-        description="Explanation of how the answer was derived")
-    additional_context: Optional[str] = Field(
-        default=None, description="Any additional relevant information")
-
-
-# Configure Google provider and model
-provider = GoogleProvider(api_key=GEMINI_KEY)
-model = GoogleModel("gemini-2.5-flash", provider=provider)
-
-# Initialize Pydantic AI agent
-html_analyzer_agent = Agent(
-    model,
-    system_prompt="""
-    You are an expert HTML analyzer. Your job is to analyze website content and answer user questions accurately.
-    
-    Guidelines:
-    1. Base your answers strictly on the provided HTML content
-    2. Reference specific HTML elements when possible
-    3. Provide confidence scores based on how clearly the HTML supports your answer
-    4. If information is not available in the HTML, state this clearly
-    5. Focus on semantic meaning, not just text matching
-    6. Consider the context and structure of the website
-    
-    Always provide:
-    - A direct, clear answer
-    - Confidence score (0.0-1.0)
-    - Relevant HTML elements that support your answer
-    - Clear reasoning for your conclusion
+async def analyze_html(url: str, data_analyst_input: str, content: str = None) -> Dict[str, Any]:
     """
-)
+    Analyze web content using Crawl4AI and answer user questions based on data_analyst_input
 
-
-def load_html_file(html_path: Union[str, Path]) -> str:
-    """Load HTML content from file path."""
+    Args:
+        url: The URL to crawl and analyze
+        data_analyst_input: User's questions/queries about the web content
+        content: Optional pre-fetched HTML content (will be ignored, we'll fetch fresh)
+    """
     try:
-        html_path = Path(html_path)
-        if not html_path.exists():
-            raise FileNotFoundError(f"HTML file not found: {html_path}")
+        # Get crawler instance
+        crawler = await get_crawler()
 
-        with open(html_path, 'r', encoding='utf-8') as file:
-            return file.read()
-    except UnicodeDecodeError:
-        # Try with different encoding if UTF-8 fails
-        with open(html_path, 'r', encoding='latin-1') as file:
-            return file.read()
+        # Create extraction strategy based on user input
+        extraction_strategy = create_extraction_strategy(data_analyst_input)
 
+        # Crawl the webpage with extraction strategy
+        result = await crawler.arun(
+            url=url,
+            extraction_strategy=extraction_strategy,
+            chunking_strategy=RegexChunking(),
+            bypass_cache=True,
+            process_iframes=True,
+            remove_overlay_elements=True
+        )
 
-def prune_html(html_content: str) -> str:
-    """
-    Prune HTML content to remove unnecessary elements while preserving semantic structure.
-    Based on the paper's HTML pruning approach.
-    """
-    soup = BeautifulSoup(html_content, 'html.parser')
-
-    # Remove comments, scripts, styles, and other non-content elements
-    for element in soup(['script', 'style', 'meta', 'link', 'noscript']):
-        element.decompose()
-
-    # Remove HTML comments
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
-        comment.extract()
-
-    # Keep only essential attributes for key elements
-    essential_attrs = {
-        'input': ['type', 'name', 'id', 'placeholder', 'value', 'required'],
-        'form': ['action', 'method', 'name', 'id'],
-        'a': ['href', 'title', 'id'],
-        'img': ['src', 'alt', 'title', 'id'],
-        'button': ['type', 'name', 'id'],
-        'select': ['name', 'id'],
-        'textarea': ['name', 'id', 'placeholder'],
-        'div': ['id', 'class'],
-        'span': ['id', 'class'],
-        'h1': ['id', 'class'], 'h2': ['id', 'class'], 'h3': ['id', 'class'],
-        'h4': ['id', 'class'], 'h5': ['id', 'class'], 'h6': ['id', 'class']
-    }
-
-    # Clean up attributes
-    for element in soup.find_all():
-        if isinstance(element, Tag):  # Only process Tag elements, not strings
-            if element.name in essential_attrs:
-                # Keep only essential attributes
-                attrs_to_keep = essential_attrs[element.name]
-                element.attrs = {k: v for k, v in element.attrs.items()
-                                 if k in attrs_to_keep}
-            else:
-                # For other tags, keep only id and class
-                element.attrs = {k: v for k, v in element.attrs.items() if k in [
-                    'id', 'class']}
-
-    return str(soup)
-
-
-def extract_website_structure(html_content: str) -> WebsiteStructure:
-    """
-    Extract structured information from HTML content.
-    Implements the parser-processed approach from the paper.
-    """
-    soup = BeautifulSoup(html_content, 'html.parser')
-
-    # Extract title
-    title_tag = soup.find('title')
-    title = title_tag.get_text().strip() if title_tag else ""
-
-    # Extract meta description
-    desc_tag = soup.find('meta', attrs={'name': 'description'})
-    description = desc_tag.get(
-        'content', "") if desc_tag and isinstance(desc_tag, Tag) else ""
-
-    # Extract headings
-    headings = []
-    for i in range(1, 7):
-        for heading in soup.find_all(f'h{i}'):
-            if isinstance(heading, Tag):
-                headings.append({
-                    'level': str(i),  # Convert to string for Pydantic model
-                    'text': heading.get_text().strip(),
-                    'id': heading.get('id', ''),
-                    'tag': f'h{i}'
-                })
-
-    # Extract forms
-    forms = []
-    for form in soup.find_all('form'):
-        if isinstance(form, Tag):
-            form_data = {
-                'id': form.get('id', ''),
-                'action': form.get('action', ''),
-                'method': form.get('method', 'get'),
-                'inputs': []
+        if not result.success:
+            return {
+                "success": False,
+                "error": f"Failed to crawl URL: {result.error_message}",
+                "url": url,
+                "data_analyst_input": data_analyst_input
             }
 
-            for input_elem in form.find_all(['input', 'select', 'textarea']):
-                if isinstance(input_elem, Tag):
-                    input_data = {
-                        'tag': input_elem.name,
-                        'type': input_elem.get('type', ''),
-                        'name': input_elem.get('name', ''),
-                        'id': input_elem.get('id', ''),
-                        'placeholder': input_elem.get('placeholder', ''),
-                        'value': input_elem.get('value', '')
-                    }
-                    form_data['inputs'].append(input_data)
+        # Extract structured information
+        extracted_content = process_extraction_result(
+            result, data_analyst_input)
 
-            forms.append(form_data)
+        # Generate answer based on extracted content and user input
+        answer = await generate_answer(extracted_content, data_analyst_input, result)
 
-    # Extract links
-    links = []
-    for link in soup.find_all('a', href=True):
-        if isinstance(link, Tag):
-            links.append({
-                'text': link.get_text().strip(),
-                'href': link.get('href', ''),
-                'title': link.get('title', ''),
-                'id': link.get('id', '')
-            })
+        return {
+            "success": True,
+            "url": url,
+            "data_analyst_input": data_analyst_input,
+            "extracted_content": extracted_content,
+            "answer": answer,
+            "page_title": result.metadata.get("title", ""),
+            "page_description": result.metadata.get("description", ""),
+            "links_found": len(result.links.get("internal", [])) + len(result.links.get("external", [])),
+            "media_found": len(result.media.get("images", [])) + len(result.media.get("videos", [])),
+            "word_count": len(result.cleaned_html.split()) if result.cleaned_html else 0
+        }
 
-    # Extract images
-    images = []
-    for img in soup.find_all('img'):
-        if isinstance(img, Tag):
-            images.append({
-                'src': img.get('src', ''),
-                'alt': img.get('alt', ''),
-                'title': img.get('title', ''),
-                'id': img.get('id', '')
-            })
+    except Exception as e:
+        logger.error(f"Error analyzing HTML with Crawl4AI: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "url": url,
+            "data_analyst_input": data_analyst_input
+        }
 
-    # Extract main content (remove nav, header, footer, sidebar)
-    content_soup = BeautifulSoup(str(soup), 'html.parser')
-    for element in content_soup(['nav', 'header', 'footer', 'aside']):
-        element.decompose()
 
-    main_content = content_soup.get_text().strip()
-    # Clean up whitespace
-    main_content = re.sub(r'\s+', ' ', main_content)[:2000]  # Limit length
+def create_extraction_strategy(data_analyst_input: str) -> LLMExtractionStrategy:
+    """
+    Create an LLM extraction strategy based on user input
+    """
+    # Create a comprehensive prompt that includes the user's question
+    extraction_prompt = f"""
+    Based on the following user question/request: "{data_analyst_input}"
 
-    # Extract meta information
-    meta_info = {}
-    for meta in soup.find_all('meta'):
-        if isinstance(meta, Tag):
-            name = meta.get('name') or meta.get('property', '')
-            content = meta.get('content', '')
-            if name and content:
-                meta_info[str(name)] = str(content)
+    Please extract and analyze the relevant information from this webpage. Focus on:
 
-    return WebsiteStructure(
-        title=title,
-        description=str(description) if description else "",
-        headings=headings,
-        forms=forms,
-        links=links,
-        images=images,
-        main_content=main_content,
-        meta_info=meta_info
+    1. Direct answers to the user's question
+    2. Related data, statistics, numbers, or facts
+    3. Tables, lists, or structured data that might be relevant
+    4. Key information that addresses the user's needs
+    5. Any specific elements mentioned in the user's question (like companies, products, dates, etc.)
+    6. provide output exactly stated in user question/request
+
+    If you cannot find relevant information, clearly state what information is not available.
+    """
+
+    # Check if API key is available
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+
+    return LLMExtractionStrategy(
+        provider="google/gemini-2.5-flash",
+        api_token=gemini_api_key,
+        instruction=extraction_prompt,
+        schema={
+            "type": "object",
+            "properties": {
+                "direct_answer": {"type": "string"},
+                "relevant_data": {"type": "array", "items": {"type": "string"}},
+                "tables_data": {"type": "array", "items": {"type": "string"}},
+                "key_information": {"type": "array", "items": {"type": "string"}},
+                "specific_elements": {"type": "array", "items": {"type": "string"}},
+                "additional_context": {"type": "string"}
+            }
+        }
     )
 
 
-def create_analysis_prompt(structure: WebsiteStructure, questions: List[str]) -> str:
+def process_extraction_result(result, data_analyst_input: str) -> Dict[str, Any]:
     """
-    Create a comprehensive prompt for analysis.
-    Based on the paper's prompt design framework.
-    """
-    # Convert structure to JSON for the prompt
-    structure_json = structure.model_dump()
-
-    # Format questions
-    questions_text = "\n".join(
-        [f"Q{i+1}: {q}" for i, q in enumerate(questions)])
-
-    prompt = f"""
-    WEBSITE ANALYSIS TASK
-    
-    You are analyzing a website with the following structure and content:
-    
-    WEBSITE INFORMATION:
-    - Title: {structure.title}
-    - Description: {structure.description}
-    - Number of headings: {len(structure.headings)}
-    - Number of forms: {len(structure.forms)}
-    - Number of links: {len(structure.links)}
-    - Number of images: {len(structure.images)}
-    
-    DETAILED STRUCTURE:
-    {json.dumps(structure_json, indent=2)}
-    
-    QUESTIONS TO ANSWER:
-    {questions_text}
-    
-    INSTRUCTIONS:
-    1. Answer each question based strictly on the provided website structure
-    2. Reference specific elements (by ID, text content, or tag type) that support your answer
-    3. If information is not available, clearly state this
-    4. Provide confidence scores based on how well the HTML supports your conclusions
-    5. Give detailed reasoning for your answers
-    
-    For multiple questions, answer them in order (Q1, Q2, etc.) but provide a single consolidated response.
-    """
-
-    return prompt
-
-
-async def analyze_html(html_path: Union[str, Path], questions: Union[str, List[str]]) -> Dict[str, Any]:
-    """
-    Main function to analyze HTML content and answer questions.
-
-    Args:
-        html_path: Path to the HTML file
-        questions: Single question string or list of questions
-
-    Returns:
-        AnalysisResponse: Structured response with answers and analysis
+    Process the crawl result and extract relevant information
     """
     try:
-        # Ensure questions is a list
-        if isinstance(questions, str):
-            questions = [questions]
-
-        # Load HTML content
-        print(f"Loading HTML from: {html_path}")
-        html_content = load_html_file(html_path)
-
-        # Prune HTML to remove unnecessary content
-        print("Processing HTML content...")
-        pruned_html = prune_html(html_content)
-
-        # Extract structured information
-        website_structure = extract_website_structure(pruned_html)
-        print(f"Extracted structure: {len(website_structure.headings)} headings, "
-              f"{len(website_structure.forms)} forms, {len(website_structure.links)} links")
-
-        # Create analysis prompt
-        prompt = create_analysis_prompt(website_structure, questions)
-
-        # Get AI analysis
-        print("Analyzing with AI...")
-        response = await html_analyzer_agent.run(prompt)
-
-        # Since we're not using structured output, create a simple response
-        return {
-            "answer": str(response),
-            "confidence": 0.8,  # Default confidence
-            "relevant_elements": ["HTML structure analyzed"],
-            "reasoning": "Analysis based on HTML content structure",
-            "additional_context": f"Analyzed {len(website_structure.headings)} headings, {len(website_structure.forms)} forms, {len(website_structure.links)} links"
+        extracted_content = {
+            "title": result.metadata.get("title", ""),
+            "description": result.metadata.get("description", ""),
+            "text_content": result.cleaned_html,
+            "markdown_content": result.markdown,
+            "links": {
+                "internal": result.links.get("internal", []),
+                "external": result.links.get("external", [])
+            },
+            "media": {
+                "images": result.media.get("images", []),
+                "videos": result.media.get("videos", []),
+                "audios": result.media.get("audios", [])
+            },
+            "extracted_data": None
         }
+
+        # If LLM extraction was used, parse the result
+        if hasattr(result, 'extracted_content') and result.extracted_content:
+            try:
+                if isinstance(result.extracted_content, str):
+                    extracted_content["extracted_data"] = json.loads(
+                        result.extracted_content)
+                else:
+                    extracted_content["extracted_data"] = result.extracted_content
+            except json.JSONDecodeError:
+                extracted_content["extracted_data"] = {
+                    "raw_extraction": result.extracted_content}
+
+        return extracted_content
 
     except Exception as e:
-        # Return error response
+        logger.error(f"Error processing extraction result: {str(e)}")
         return {
-            "answer": f"Error analyzing HTML: {str(e)}",
-            "confidence": 0.0,
-            "relevant_elements": [],
-            "reasoning": f"An error occurred during analysis: {str(e)}",
-            "additional_context": "Please check the HTML file path and content."
-        }
-
-# Synchronous wrapper for easier use
-
-
-def analyze_html_sync(html_path: Union[str, Path], questions: Union[str, List[str]]) -> Dict[str, Any]:
-    """
-    Synchronous wrapper for the analyze_html function.
-    """
-    return asyncio.run(analyze_html(html_path, questions))
-
-
-def analyze_html_default(html_path: Union[str, Path]) -> Dict[str, Any]:
-    """
-    Default HTML analysis without specific questions.
-    Returns a dictionary with general website information suitable for data analysis.
-
-    Args:
-        html_path: Path to the HTML file
-
-    Returns:
-        Dict containing website structure and basic analysis
-    """
-    try:
-        # Load and process HTML
-        html_content = load_html_file(html_path)
-        pruned_html = prune_html(html_content)
-        structure = extract_website_structure(pruned_html)
-
-        # Convert to dictionary for JSON serialization
-        result = {
-            "title": structure.title,
-            "description": structure.description,
-            "headings_count": len(structure.headings),
-            "headings": structure.headings[:10],  # Limit to first 10
-            "forms_count": len(structure.forms),
-            "forms": structure.forms,
-            "links_count": len(structure.links),
-            "links": structure.links[:20],  # Limit to first 20
-            "images_count": len(structure.images),
-            "images": structure.images[:10],  # Limit to first 10
-            "main_content_preview": structure.main_content[:500] if structure.main_content else "",
-            "meta_info": structure.meta_info,
-            "analysis_type": "html_structure"
-        }
-
-        return result
-
-    except Exception as e:
-        return {
-            "error": str(e),
-            "analysis_type": "html_structure",
             "title": "",
             "description": "",
-            "headings_count": 0,
-            "forms_count": 0,
-            "links_count": 0,
-            "images_count": 0
+            "text_content": "",
+            "markdown_content": "",
+            "links": {"internal": [], "external": []},
+            "media": {"images": [], "videos": [], "audios": []},
+            "extracted_data": None,
+            "error": str(e)
         }
 
-# Example usage and testing function
 
-
-async def test_analyzer():
-    """Test function to demonstrate usage."""
-    # Example HTML content for testing
-    test_html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Sample E-commerce Site</title>
-        <meta name="description" content="Best online store for electronics">
-    </head>
-    <body>
-        <header>
-            <h1>TechStore</h1>
-            <nav>
-                <a href="/products">Products</a>
-                <a href="/about">About</a>
-                <a href="/contact">Contact</a>
-            </nav>
-        </header>
-        <main>
-            <h2>Featured Products</h2>
-            <div class="product">
-                <h3>Smartphone Pro</h3>
-                <p>Latest model with advanced features</p>
-                <img src="phone.jpg" alt="Smartphone Pro">
-                <form id="purchase-form" method="post" action="/buy">
-                    <input type="hidden" name="product_id" value="123">
-                    <input type="number" name="quantity" placeholder="Quantity" min="1" value="1">
-                    <button type="submit">Add to Cart</button>
-                </form>
-            </div>
-        </main>
-        <footer>
-            <p>&copy; 2024 TechStore</p>
-        </footer>
-    </body>
-    </html>
+async def generate_answer(extracted_content: Dict[str, Any],
+                          data_analyst_input: str, result) -> str:
     """
+    Generate a comprehensive answer based on extracted content and user input
+    """
+    try:
+        # If we have LLM extracted data, use it primarily
+        if extracted_content.get("extracted_data"):
+            extracted_data = extracted_content["extracted_data"]
 
-    # Save test HTML to file
-    test_file = Path("test_website.html")
-    with open(test_file, 'w', encoding='utf-8') as f:
-        f.write(test_html)
+            answer_parts = []
 
-    # Test questions
-    test_questions = [
-        "What is the name of this website?",
-        "What products are featured on the homepage?",
-        "How can users purchase products?",
-        "What navigation options are available?"
-    ]
+            if extracted_data.get("direct_answer"):
+                answer_parts.append(
+                    f"Direct Answer: {extracted_data['direct_answer']}")
 
-    # Analyze
-    result = await analyze_html(test_file, test_questions)
+            if extracted_data.get("relevant_data"):
+                answer_parts.append("\nRelevant Data:")
+                for data_point in extracted_data["relevant_data"]:
+                    answer_parts.append(f"• {data_point}")
 
-    print("=== ANALYSIS RESULT ===")
-    print(f"Answer: {result['answer']}")
-    print(f"Confidence: {result['confidence']}")
-    print(f"Relevant Elements: {result['relevant_elements']}")
-    print(f"Reasoning: {result['reasoning']}")
-    if result.get('additional_context'):
-        print(f"Additional Context: {result['additional_context']}")
+            if extracted_data.get("key_information"):
+                answer_parts.append("\nKey Information:")
+                for info in extracted_data["key_information"]:
+                    answer_parts.append(f"• {info}")
 
-    # Clean up
-    test_file.unlink()
+            if extracted_data.get("tables_data"):
+                answer_parts.append("\nTable Data:")
+                for table_info in extracted_data["tables_data"]:
+                    answer_parts.append(f"• {table_info}")
 
-if __name__ == "__main__":
-    # Run test
-    asyncio.run(test_analyzer())
+            if extracted_data.get("specific_elements"):
+                answer_parts.append("\nSpecific Elements Found:")
+                for element in extracted_data["specific_elements"]:
+                    answer_parts.append(f"• {element}")
+
+            if extracted_data.get("additional_context"):
+                answer_parts.append(
+                    f"\nAdditional Context: {extracted_data['additional_context']}")
+
+            if answer_parts:
+                return "\n".join(answer_parts)
+
+        # Fallback: Manual content analysis
+        return _manual_content_analysis(extracted_content, data_analyst_input)
+
+    except Exception as e:
+        logger.error(f"Error generating answer: {str(e)}")
+        return _manual_content_analysis(extracted_content, data_analyst_input)
+
+
+def _manual_content_analysis(extracted_content: Dict[str, Any],
+                             data_analyst_input: str) -> str:
+    """
+    Fallback manual content analysis when LLM extraction is not available
+    """
+    try:
+        answer_parts = []
+
+        # Basic page information
+        if extracted_content.get("title"):
+            answer_parts.append(
+                f"Page Title: {extracted_content['title']}")
+
+        if extracted_content.get("description"):
+            answer_parts.append(
+                f"Page Description: {extracted_content['description']}")
+
+        # Content analysis based on user input
+        input_lower = data_analyst_input.lower()
+        text_content = extracted_content.get("text_content", "")
+
+        # Extract keywords from user input
+        keywords = re.findall(r'\b\w{3,}\b', input_lower)
+        keywords = [k for k in keywords if k not in [
+            'what', 'how', 'when', 'where', 'why', 'the', 'and', 'for']]
+
+        # Find relevant sentences
+        if text_content and keywords:
+            sentences = re.split(r'[.!?]+', text_content)
+            relevant_sentences = []
+
+            for sentence in sentences:
+                sentence_lower = sentence.lower()
+                if any(keyword in sentence_lower for keyword in keywords):
+                    relevant_sentences.append(sentence.strip())
+                    if len(relevant_sentences) >= 5:
+                        break
+
+            if relevant_sentences:
+                answer_parts.append("\nRelevant Information Found:")
+                for sentence in relevant_sentences:
+                    if len(sentence) > 20:  # Filter out very short sentences
+                        answer_parts.append(f"• {sentence}")
+
+        # Links information
+        internal_links = extracted_content.get(
+            "links", {}).get("internal", [])
+        external_links = extracted_content.get(
+            "links", {}).get("external", [])
+
+        if internal_links or external_links:
+            answer_parts.append(
+                f"\nLinks Found: {len(internal_links)} internal, {len(external_links)} external")
+
+        # Media information
+        media = extracted_content.get("media", {})
+        images = media.get("images", [])
+        videos = media.get("videos", [])
+
+        if images or videos:
+            answer_parts.append(
+                f"\nMedia Found: {len(images)} images, {len(videos)} videos")
+
+        if not answer_parts:
+            answer_parts.append(
+                "I was able to access the webpage, but couldn't find specific information related to your query. The page may not contain the information you're looking for, or it might be structured in a way that makes extraction difficult.")
+
+        return "\n".join(answer_parts)
+
+    except Exception as e:
+        logger.error(f"Error in manual content analysis: {str(e)}")
+        return f"I encountered an error while analyzing the webpage content: {str(e)}"
+
+
+async def close(self):
+    """Close the crawler session"""
+    if self.crawler:
+        await self.crawler.aclose()
+        self.crawler = None
