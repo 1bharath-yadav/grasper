@@ -88,7 +88,7 @@ Data Analyst Input → Task Breakdown → Code Generation → Execution → Erro
 
 Access metrics at: `http://localhost:8000/metrics`
 
-
+## 99% code written by llm
 ---
 
 **Built with ❤️ using PydanticAI**

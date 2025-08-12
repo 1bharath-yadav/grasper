@@ -6,7 +6,7 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic-ai-slim[mcp,google]",
+    "pydantic-ai-slim[duckduckgo,google,mcp]",
     "google-generativeai",
     "duckdb",
     "fastapi",
@@ -37,6 +37,12 @@ dependencies = [
     "python-dotenv",
     "boilerpy3>=1.0.7",
     "networkx>=3.5",
+    "streamlit>=1.48.0",
+    "html5lib>=1.1",
+    "pytest>=8.4.1",
+    "chardet>=5.2.0",
+    "urlextract>=1.9.0",
+    "mcp>=1.12.3",
 ]
 
 [project.optional-dependencies]
