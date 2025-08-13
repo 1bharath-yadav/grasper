@@ -43,6 +43,11 @@ dependencies = [
     "chardet>=5.2.0",
     "urlextract>=1.9.0",
     "mcp>=1.12.3",
+    "duckduckgo-search>=8.1.1",
+    "crawl4ai>=0.7.3",
+    "pytesseract>=0.3.13",
+    "PyPDF2>=3.0.1",
+    "litellm>=1.75.5.post1",
 ]
 
 [project.optional-dependencies]

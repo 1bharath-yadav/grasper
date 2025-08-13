@@ -4,6 +4,7 @@ import uvicorn
 import logfire
 
 from app.routes import router  # Your custom routes
+from app.config import API_HOST, API_PORT
 
 # Configure Logfire
 logfire.configure()
@@ -40,4 +41,4 @@ def health_check():
 # Run with: python app/main.py OR uvicorn app.main:app --reload
 if __name__ == "__main__":
     logfire.info("Starting Grasper AI server")
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host=API_HOST, port=API_PORT, reload=True)

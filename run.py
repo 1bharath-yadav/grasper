@@ -1,4 +1,5 @@
-import uvicorn
-
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", reload=True, port=8000)
+from dotenv import load_dotenv
+import os
+# Load environment variables from .env file
+load_dotenv()
+PROVIDER_URL = os.getenv("PROVIDER_URL", "http://localhost:8000/api/")

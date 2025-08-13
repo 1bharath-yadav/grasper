@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
+from app.config import get_gemini_model
 from pydantic_ai import Agent, BinaryContent, StructuredDict
 from typing import List, Optional
 import os
@@ -35,22 +34,15 @@ class MediaMetadata(BaseModel):
 # Optional: get JSON schema from Pydantic
 mediametadata_schema = MediaMetadata.model_json_schema()
 
-# ----------------------------
-#   Gemini Flash LLM Setup
-# ----------------------------
-gemini_key = os.getenv("GEMINI_API_KEY")
-if not gemini_key:
-    raise ValueError("GEMINI_API_KEY environment variable is not set")
 
-settings = GoogleModelSettings(google_thinking_config={"thinking_budget": 0})
-provider = GoogleProvider(api_key=gemini_key)
-model = GoogleModel("gemini-2.5-flash", provider=provider)
+# Create Agent function to ensure it's created in the correct event loop
+def create_agent():
+    """Create agent with proper event loop context"""
+    return Agent(
+        output_type=StructuredDict(mediametadata_schema),
+        model=get_gemini_model()
+    )
 
-# Create Agent with model
-agent = Agent(
-    output_type=StructuredDict(mediametadata_schema),
-    model=model
-)
 
 # ----------------------------
 #   Helper: Read File as Bytes
@@ -69,10 +61,23 @@ async def _read_file_as_bytes(path: str) -> bytes:
 # ----------------------------
 
 
-def _construct_prompt(fname: str, media_type: str) -> str:
-    return f"""
+async def _construct_prompt(fname: str, media_type: str) -> str:
+    prompt = f"""
 You are a highly skilled data analyst specializing in extracting structured, data-ready insights from {media_type} content.
-Analyze the file '{fname}' and produce valid JSON."""
+Analyze the file '{fname}' and produce valid JSON that matches the required schema.
+
+Please extract the following information:
+- filename: The original filename
+- media_type: The type of media (image, audio, or video)
+- description: A high-level semantic description of the content
+- detected_objects: List of distinct entities, objects, or features present
+- textual_content: Any detected text (OCR or embedded captions) if present
+- statistical_info: Any quantifiable data like counts, measurements, dimensions
+- possible_analytical_uses: Ways this media could be used in data analysis
+
+Return the analysis as a properly structured JSON object.
+"""
+    return prompt
 
 
 # ----------------------------
@@ -101,12 +106,18 @@ async def analyze_media(file_path: str) -> Optional[MediaMetadata]:
         return None
 
     try:
+        # Create agent within the function to ensure proper event loop context
+        agent = create_agent()
+
         file_bytes = await _read_file_as_bytes(str(file_path))
         print(f"Read {len(file_bytes)} bytes from {file_path}")
         media_content = BinaryContent(data=file_bytes, media_type=mime_type)
 
+        prompt = await _construct_prompt(str(file_path), media_type)
+        print(f"Generated prompt for {file_path}: {prompt[:200]}...")
+
         result = await agent.run([
-            _construct_prompt(str(file_path), media_type), media_content
+            prompt, media_content
         ])
 
         print(f"Raw agent output for {file_path}: {result.output}")
@@ -123,10 +134,7 @@ async def analyze_media(file_path: str) -> Optional[MediaMetadata]:
             return metadata
         except Exception as serialize_error:
             print(f"SERIALIZATION ERROR for {file_path}: {serialize_error}")
-            print(
-                f"Required fields: {list(MediaMetadata.model_fields.keys())}")
-            print(
-                f"Output keys: {list(result.output.keys()) if isinstance(result.output, dict) else 'Not a dict'}")
+            print(f"Raw output was: {result.output}")
             return None
 
     except Exception as e:
@@ -134,21 +142,3 @@ async def analyze_media(file_path: str) -> Optional[MediaMetadata]:
         import traceback
         traceback.print_exc()
         return None
-
-
-# # Example usage:
-# # Analyze all files in the directory
-# async def test_analyze_media():
-#     media_dir = "/home/archer/projects/grasper/tests/network"
-#     files = os.listdir(media_dir)
-#     results = []
-#     for file in files:
-#         if file.endswith(('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.avi', '.mp3', '.wav')):
-#             file_path = os.path.join(media_dir, file)
-#             result = await analyze_media(file_path)
-#             results.append(result)
-#     return results
-
-# # Run the test
-# results = asyncio.run(test_analyze_media())
-# print(results)

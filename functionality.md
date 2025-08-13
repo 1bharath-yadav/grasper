@@ -39,11 +39,11 @@ The main API endpoint (`/api/`) in `app/routes.py` handles incoming requests as 
 4. **Payload Construction**: Creates payload dictionary with:
    - `data_analyst_input`: The decoded text from questions.txt
    - `attachments`: List of uploaded file objects
-5. **Delegation**: Passes payload to `handle_payload()` function
+5. **Delegation**: Passes payload to `handle_payload_and_response()` function
 
 ## 2. Activation Flow and Core Processing Pipeline
 
-### Primary Handler: `handle_payload()` in `app/payload_handler.py`
+### Primary Handler: `handle_payload_and_response()` in `app/payload_handler.py`
 
 This is the main orchestrator that coordinates the entire analysis workflow:
 
@@ -53,7 +53,7 @@ This is the main orchestrator that coordinates the entire analysis workflow:
 **Processing Steps**:
 
 #### Step 1: Temporary Directory Management
-- **Function**: `create_temp_dir()` from `app/agent/executor.py`
+- **Function**: `create_temp_dir()` from `app/agent/file_manager.py`
 - **Trigger**: Immediately upon payload receipt
 - **Purpose**: Creates a unique temporary directory based on SHA256 hash of input text
 - **Location**: `/tmp/{hash_prefix}/` where hash_prefix is first 10 chars of SHA256
@@ -61,7 +61,7 @@ This is the main orchestrator that coordinates the entire analysis workflow:
 - **Persistence**: Directory is reused if it already exists (supports caching)
 
 #### Step 2: File Upload Processing
-- **Function**: `save_multiple_uploaded_files()` from `app/agent/executor.py`
+- **Function**: `save_multiple_uploaded_files()` from `app/agent/file_manager.py`
 - **Trigger**: If attachments are present in payload
 - **Parameters**: 
   - `uploaded_files`: List of FastAPI UploadFile objects
@@ -75,7 +75,7 @@ This is the main orchestrator that coordinates the entire analysis workflow:
 - **Dependencies**: `aiofiles`, `asyncio`
 
 #### Step 3: Data Agent Processing
-- **Function**: `handle_data()` from `app/agent/data_agent.py`
+- **Function**: `handle_urls()` from `app/agent/files_download_agent.py`
 - **Trigger**: Always executed after file handling
 - **Purpose**: Downloads additional data from URLs found in the input text
 
@@ -129,7 +129,7 @@ For each data source identified by the agent:
 - **Fallback Handling**: Continues processing even if some sources fail
 
 #### Step 4: File Analysis
-- **Function**: `analyze_dir()` from `app/agent/analyzer.py`
+- **Function**: `analyze_dir()` from `app/agent/file_analysis_handler.py`
 - **Trigger**: After all data collection is complete
 - **Purpose**: Analyzes all files in the temporary directory to create a comprehensive data report
 
@@ -160,14 +160,14 @@ For each data source identified by the agent:
    - **Dependencies**: `pandas`, `numpy`, optional `duckdb`, `pyarrow`
 
 2. **Media Files** (Images, Audio, Video):
-   - **Function**: `analyze_media()` from `app/agent/media_analyzer.py`
+   - **Function**: `analyze_media()` from `app/agent/media_file_analysis_handler.py`
    - **AI Processing**: Uses Google Gemini 2.5 Flash for content analysis
    - **Structured Output**: Extracts metadata, descriptions, detected objects
    - **Async Processing**: Processes multiple files concurrently
    - **Dependencies**: `pydantic_ai`, `mimetypes`
 
 3. **HTML Files**:
-   - **Function**: `analyze_html()` from `app/agent/html_analyzer.py`
+   - **Function**: `analyze_html()` from `app/agent/html_file_analysis_handler.py`
    - **Content Extraction**: Extracts tables, lists, text content
    - **Structure Analysis**: Identifies HTML structure and data patterns
    - **Dependencies**: `BeautifulSoup`
@@ -439,7 +439,7 @@ Answer Generation
 
 ### Comprehensive Debugging Added
 
-#### File Analysis Debugging (`analyzer.py`)
+#### File Analysis Debugging (`file_analysis_handler.py`)
 ```python
 # Added extensive debugging throughout:
 - File discovery and categorization logging

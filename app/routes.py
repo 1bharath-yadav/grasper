@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
-from app.payload_handler import handle_payload
+import logfire
+from app.payload_handler import handle_payload_and_response
 
 router = APIRouter()
 
@@ -8,6 +9,7 @@ router = APIRouter()
 
 @router.post("/", tags=["Analysis"])
 async def analyze_data(request: Request):
+    logfire.info("API request received")
     form = await request.form()
 
     # Look for questions.txt either by form field name or by filename
@@ -24,6 +26,7 @@ async def analyze_data(request: Request):
 
     # Ensure questions.txt is present
     if not questions_file:
+        logfire.error("Questions file missing")
         raise HTTPException(
             status_code=400, detail="questions.txt file is required")
 
@@ -31,8 +34,11 @@ async def analyze_data(request: Request):
     try:
         # pyright: ignore[reportAttributeAccessIssue]
         input_text = (await questions_file.read()).decode("utf-8")
+        logfire.info("Questions file read successfully",
+                     input_length=len(input_text))
 
-    except Exception:
+    except Exception as e:
+        logfire.error("Failed to read questions file", error=str(e))
         raise HTTPException(
             status_code=400, detail="Invalid questions.txt file encoding")
 
@@ -41,7 +47,11 @@ async def analyze_data(request: Request):
         "attachments": attachments
     }
 
-    return await handle_payload(payload)
+    logfire.info("Calling payload handler", attachment_count=len(attachments))
+    result = await handle_payload_and_response(payload)
+
+    logfire.info("API request completed", result_type=type(result).__name__)
+    return result
 
 
 # api to use promptfoo,streamlit and all other development things
