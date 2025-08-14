@@ -9,17 +9,16 @@ RUN useradd -m -u 1000 user
 
 COPY --chown=user . /home/user/app
 
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+
+
+
 # Environment setup
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH
 
-WORKDIR /home/user/app
 
-# Download the latest installer
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
-
-# Run the installer then remove it
-RUN sh /uv-installer.sh && rm /uv-installer.sh
 
 # Ensure the installed binary is on the `PATH`
 ENV PATH="/home/user/.local/bin:$PATH"
@@ -35,6 +34,5 @@ RUN chmod +x run.sh
 EXPOSE 7860
 EXPOSE 8501
 
-USER user
 
 ENTRYPOINT ["bash", "./run.sh"]
