@@ -17,11 +17,11 @@ WORKDIR /home/user/app
 # Copy application files and set ownership to the non-root user
 COPY --chown=user . /home/user/app
 
-# Download uv installer
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
-
-# Install uv into the user's local bin
-RUN sh /uv-installer.sh && rm /uv-installer.sh
+# Download and run uv installer as the non-root user
+RUN curl -fsSL https://astral.sh/uv/install.sh -o /home/user/uv-installer.sh \
+    && chmod +x /home/user/uv-installer.sh \
+    && sh /home/user/uv-installer.sh \
+    && rm /home/user/uv-installer.sh
 
 # Environment setup - make sure uv is in the PATH
 ENV HOME=/home/user \
