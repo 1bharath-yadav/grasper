@@ -466,9 +466,9 @@ REQUIREMENTS:
 3. Include ALL necessary imports
 4. Answer ALL questions in the user request
 5. Output in the EXACT format requested by the user
-6. Handle file reading/writing properly
-7. If HTML data exists, read HTML files from temp_dir and analyze them
-8. Print the final results clearly
+6. If HTML data exists, read HTML files from temp_dir and analyze them
+7. Print the final results clearly
+8. Dont handle errors, just generate code that answers the question
 """
             else:
                 # For retry attempts, include the previous error
