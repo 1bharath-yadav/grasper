@@ -630,3 +630,50 @@ async def analyze_single_file(file_path: Union[str, Path], temp_dir: str, data_a
         temp_dir=temp_path,
         force=False,
     )
+
+
+async def analyze_files_list(file_paths: List[Union[str, Path]], temp_dir: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Analyze a list of specific files.
+
+    Args:
+        file_paths: List of file paths to analyze
+        temp_dir: Optional temporary directory for processing. If None, uses parent dir of first file.
+
+    Returns:
+        Dictionary containing analysis results
+    """
+    if not file_paths:
+        return {
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "base_dir": str(Path.cwd()),
+            "files_analyzed": [],
+            "stats": {"n_files": 0},
+            "errors": ["No files provided for analysis"],
+        }
+
+    # Convert all to Path objects
+    path_objects = [Path(f) for f in file_paths]
+
+    # Use provided temp_dir or derive from first file's parent
+    if temp_dir:
+        temp_path = Path(temp_dir)
+    else:
+        temp_path = path_objects[0].parent
+
+    # Filter out non-existent files
+    existing_files = [f for f in path_objects if f.exists()]
+    if not existing_files:
+        return {
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "base_dir": str(temp_path),
+            "files_analyzed": [],
+            "stats": {"n_files": 0},
+            "errors": [f"No valid files found from: {[str(f) for f in path_objects]}"],
+        }
+
+    return await analyze_data(
+        all_file_paths=existing_files,
+        temp_dir=temp_path,
+        force=False,
+    )

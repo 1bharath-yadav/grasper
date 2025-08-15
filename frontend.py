@@ -82,7 +82,8 @@ def make_multipart_files(uploaded_files, questions_text: str, use_questions_file
         for f in uploaded_files:
             if f.name.lower() == "questions.txt":
                 f.seek(0)
-                files["questions.txt"] = ("questions.txt", f.read(), "text/plain")
+                files["questions.txt"] = (
+                    "questions.txt", f.read(), "text/plain")
                 break
     else:
         # create questions.txt from text
@@ -196,7 +197,7 @@ st.markdown(
     "Upload data files and ask questions to get instant analyses, visualizations and downloadable results."
 )
 
-DEFAULT_API = "http://localhost:7860/api"
+DEFAULT_API = "http://localhost:8000/api"
 
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -282,7 +283,8 @@ with left:
                     f.seek(0)
                     questions_from_file = f.read().decode("utf-8")
                     questions_file_found = True
-                    st.success("✅ Found questions.txt — loaded into questions box.")
+                    st.success(
+                        "✅ Found questions.txt — loaded into questions box.")
                 except Exception:
                     st.warning(
                         "Could not read uploaded questions.txt (encoding issue)."
@@ -336,10 +338,12 @@ with right:
                 progress.progress(10)
                 # send request
                 with st.spinner("Awaiting API response..."):
-                    resp = requests.post(api_endpoint, files=files, timeout=timeout)
+                    resp = requests.post(
+                        api_endpoint, files=files, timeout=timeout)
                 progress.progress(60)
                 if resp.status_code != 200:
-                    status.error(f"API returned {resp.status_code}: {resp.text}")
+                    status.error(
+                        f"API returned {resp.status_code}: {resp.text}")
                     progress.progress(100)
                 else:
                     # parse JSON
@@ -386,7 +390,8 @@ with right:
                             with st.expander(
                                 "🐍 Generated Python Code", expanded=False
                             ):
-                                st.code(answers["generated_code"], language="python")
+                                st.code(answers["generated_code"],
+                                        language="python")
                                 # also offer download
                                 generated_code_str = answers["generated_code"]
                                 if not isinstance(generated_code_str, str):
@@ -419,7 +424,8 @@ with right:
                                     if body.strip().startswith(
                                         "{"
                                     ) and body.strip().endswith("}"):
-                                        parsed_answer = eval(body, {"__builtins__": {}})
+                                        parsed_answer = eval(
+                                            body, {"__builtins__": {}})
                                 except Exception:
                                     parsed_answer = None
                         elif isinstance(body, (dict, list)):
@@ -436,7 +442,8 @@ with right:
                                     df = pd.DataFrame(parsed_answer)
                                     st.subheader("📋 Result Table (parsed)")
                                     st.dataframe(df)
-                                    csv = df.to_csv(index=False).encode("utf-8")
+                                    csv = df.to_csv(
+                                        index=False).encode("utf-8")
                                     st.download_button(
                                         "⬇️ Download CSV",
                                         data=csv,
@@ -475,7 +482,8 @@ with right:
     st.subheader("🕘 Recent Results")
     if st.session_state.history:
         for idx, entry in enumerate(st.session_state.history[:3]):
-            t = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry["time"]))
+            t = time.strftime("%Y-%m-%d %H:%M:%S",
+                              time.localtime(entry["time"]))
             with st.expander(f"{idx+1}. Result at {t}", expanded=False):
                 st.json(entry["result"])
                 # offer download of entire JSON
