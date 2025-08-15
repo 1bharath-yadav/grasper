@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
+from app.agent.utils import convert_numpy_types
 import logfire
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext, StructuredDict
@@ -338,7 +339,7 @@ async def orchestrator(
                 return final_answer
             else:
                 logfire.info("Returning full result from answer generation")
-                return final_result
+                return convert_numpy_types(final_result)
 
         except Exception as e:
             logfire.error("Direct orchestration failed", error=str(e),
