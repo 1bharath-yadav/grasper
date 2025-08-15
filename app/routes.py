@@ -17,6 +17,9 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24 * 7
 
+# In-memory storage for API keys (session-based)
+api_key_store = {}
+
 # Pydantic models
 
 
@@ -30,6 +33,16 @@ class UserInfo(BaseModel):
     email: str
     name: str
     picture: Optional[str] = None
+
+
+class ApiKeyRequest(BaseModel):
+    session_id: str
+    api_key: str
+
+
+class ApiKeyResponse(BaseModel):
+    message: str
+    status: str
 
 # JWT Authentication Functions
 
@@ -137,14 +150,40 @@ async def logout(response: Response):
 
 @router.get("/me", response_model=UserInfo, tags=["Authentication"])
 async def get_current_user(user_info: dict = Depends(get_current_user_from_cookie)):
-    """
-    Get current user information from cookie
-    """
+    """Get current user information from cookie"""
     return UserInfo(
         email=user_info.get("email", ""),
         name=user_info.get("name", ""),
         picture=user_info.get("picture")
     )
+
+
+@router.post("/set_api_key/", response_model=ApiKeyResponse, tags=["Configuration"])
+async def set_api_key(request: ApiKeyRequest):
+    """Set Gemini API key for a session"""
+    try:
+        # Store API key for this session
+        api_key_store[request.session_id] = request.api_key
+        logfire.info("API key set for session", session_id=request.session_id)
+
+        return ApiKeyResponse(
+            message="API key set successfully",
+            status="active"
+        )
+    except Exception as e:
+        logfire.error("Failed to set API key", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to set API key")
+
+
+@router.get("/api_key_status/{session_id}", tags=["Configuration"])
+async def get_api_key_status(session_id: str):
+    """Check if API key is set for a session"""
+    has_key = session_id in api_key_store
+    return {
+        "session_id": session_id,
+        "status": "active" if has_key else "not_set",
+        "has_key": has_key
+    }
 
 
 # Dependency function to verify the Google token
