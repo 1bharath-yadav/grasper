@@ -531,6 +531,8 @@ Generate the corrected Python code.
 
                     # Try to parse output as JSON if possible
                     final_answer = execution_result.output
+                    logfire.info(
+                        f"Parsing final answer output: {final_answer}")
                     try:
                         # Attempt to parse as JSON
                         if execution_result.output:
