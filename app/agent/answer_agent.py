@@ -14,6 +14,47 @@ from pydantic_ai import Agent, ModelRetry, RunContext
 
 from app.config import get_gemini_model, get_gemini_model
 
+from serpapi import GoogleSearch
+from dotenv import load_dotenv
+load_dotenv()
+serp_api = os.getenv("SERP_API_KEY")
+
+
+def google_ai_overview_search(query: str, page_token: Optional[str] = None, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Perform a Google AI Overview search via SerpAPI and return the ai_overview section if available.
+
+    This function is safe to call even if SERP_API_KEY is not set; it will log a warning and
+    return None in that case. It accepts an optional page_token to page through results.
+    """
+    key = api_key or serp_api
+    if not key:
+        try:
+            logfire.warn(
+                "SERP_API_KEY not set; skipping Google AI Overview search")
+        except Exception:
+            # logfire may not be configured at import time; ignore if unavailable
+            pass
+        return None
+
+    params = {
+        "engine": "google_ai_overview",
+        "q": query,
+        "api_key": key,
+    }
+    if page_token:
+        params["page_token"] = page_token
+
+    try:
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        return results.get("ai_overview")
+    except Exception as e:
+        try:
+            logfire.error("Google AI Overview search failed", error=str(e))
+        except Exception:
+            pass
+        return None
+
 
 @dataclass
 class AnswerContext:
@@ -391,6 +432,18 @@ Generate the corrected Python code.
 
         # All attempts failed
         logfire.error("All answer generation attempts failed")
+
+        # As a last resort, perform a single SerpAPI Google AI Overview search using the user's request
+        # to surface potential answers from Google's AI Overview. This will only be attempted once.
+        serp_ai_overview = None
+        try:
+            serp_ai_overview = google_ai_overview_search(data_analysis_input)
+            if serp_ai_overview:
+                logfire.info(
+                    "Fetched Google AI Overview via SerpAPI as a fallback")
+        except Exception as e:
+            logfire.warn("Fallback SerpAPI search failed", error=str(e))
+
         return {
             "status": "error",
             "final_answer": None,
@@ -398,5 +451,6 @@ Generate the corrected Python code.
             "code_generated": None,
             "attempts_used": max_attempts,
             "error_message": "All code generation attempts failed",
-            "processing_summary": f"Failed after {max_attempts} attempts"
+            "processing_summary": f"Failed after {max_attempts} attempts",
+            "serp_ai_overview": serp_ai_overview,
         }
