@@ -30,8 +30,6 @@ ENV HOME=/home/user \
 # Install Python dependencies with uv (creates .venv owned by user)
 RUN uv sync --no-cache-dir
 
-# Make the run script executable
-RUN chmod +x run.sh
 
 # Expose application ports
 EXPOSE 7860
