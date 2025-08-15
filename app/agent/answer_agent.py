@@ -1,5 +1,7 @@
 # file: answer_agent.py
 
+import decimal
+import ast
 import os
 import sys
 import asyncio
@@ -18,6 +20,103 @@ from serpapi import GoogleSearch
 from dotenv import load_dotenv
 load_dotenv()
 serp_api = os.getenv("SERP_API_KEY")
+
+
+# New helper: convert numpy/pandas and other non-serializable types to native Python types
+
+
+def convert_numpy_types(obj):
+    """Recursively convert numpy, pandas and other non-JSON-serializable types to native Python types.
+
+    This function tries to import numpy and pandas if available and will convert common types
+    (np.ndarray, np.generic, pandas.Timestamp, pandas.Series, pandas.DataFrame) into
+    JSON-serializable Python objects (lists, dicts, ints, floats, strings).
+    Falls back to str() for unknown types.
+    """
+    # Local imports to avoid hard dependency at module import time
+    np = None
+    pd = None
+    try:
+        import numpy as _np
+        np = _np
+    except Exception:
+        np = None
+    try:
+        import pandas as _pd
+        pd = _pd
+    except Exception:
+        pd = None
+
+    # Handle simple built-ins
+    if obj is None or isinstance(obj, (str, bool, int, float)):
+        return obj
+
+    # Decimal
+    if isinstance(obj, decimal.Decimal):
+        try:
+            # Convert to int if no fractional part else float
+            if obj == obj.to_integral_value():
+                return int(obj)
+            return float(obj)
+        except Exception:
+            return float(obj)
+
+    # Numpy scalars
+    if np is not None:
+        if isinstance(obj, np.generic):
+            try:
+                return obj.item()
+            except Exception:
+                try:
+                    return int(obj)
+                except Exception:
+                    try:
+                        return float(obj)
+                    except Exception:
+                        return str(obj)
+        # Numpy arrays
+        if isinstance(obj, np.ndarray):
+            return [convert_numpy_types(x) for x in obj.tolist()]
+
+    # Pandas types
+    if pd is not None:
+        # DataFrame -> list of dicts
+        if isinstance(obj, pd.DataFrame):
+            try:
+                return json.loads(obj.to_json(orient="records", date_format="iso"))
+            except Exception:
+                return [convert_numpy_types(row) for _, row in obj.iterrows()]
+        # Series -> list or single value
+        if isinstance(obj, pd.Series):
+            try:
+                return convert_numpy_types(obj.tolist())
+            except Exception:
+                return [convert_numpy_types(x) for x in obj]
+        # Timestamp
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+
+    # Mapping types
+    if isinstance(obj, dict):
+        return {str(k): convert_numpy_types(v) for k, v in obj.items()}
+
+    # Iterable types (list, tuple, set, generator)
+    if isinstance(obj, (list, tuple, set)):
+        return [convert_numpy_types(x) for x in list(obj)]
+
+    # Try to detect objects with __dict__
+    if hasattr(obj, "__dict__"):
+        try:
+            return {k: convert_numpy_types(v) for k, v in obj.__dict__.items()}
+        except Exception:
+            pass
+
+    # Fallback to str
+    try:
+        json.dumps(obj)
+        return obj
+    except Exception:
+        return str(obj)
 
 
 def google_ai_overview_search(query: str, page_token: Optional[str] = None, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -105,6 +204,11 @@ Code Requirements:
 - Convert final outputs to JSON serializable format
 - Output in the EXACT format requested by the user
 
+You can also call available tools to help answer the question.  
+Tools:  
+2. serpapi_google_ai_overview(query) → Searches Google AI Overview via SerpAPI for relevant information.  
+Use serpapi_google_ai_overview when you cannot answer from provided context or need up-to-date external information.
+- If there is no output format specified, output should be any reasonable json format.
 Never generate incomplete code or placeholder functions."""
 )
 
@@ -262,6 +366,41 @@ def build_analysis_context(analysis_report: Optional[Dict[str, Any]],
     return "\n".join(context_parts)
 
 
+@answer_agent.tool
+async def serpapi_google_ai_overview(ctx: RunContext[AnswerContext], query: str) -> Dict[str, Any]:
+    """
+    Search Google AI Overview via SerpAPI for a given query.
+    The LLM can call this when it cannot answer directly.
+    """
+    key = serp_api
+    if not key:
+        return {
+            "status": "error",
+            "message": "SERP_API_KEY not set"
+        }
+
+    params = {
+        "engine": "google_ai_overview",
+        "q": query,
+        "api_key": key,
+    }
+
+    try:
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        return {
+            "status": "success",
+            "query": query,
+            "ai_overview": results.get("ai_overview"),
+            "raw_results": results
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
 async def answer_questions(
     data_analysis_input: str,
     temp_dir: str,
@@ -395,11 +534,27 @@ Generate the corrected Python code.
                     try:
                         # Attempt to parse as JSON
                         if execution_result.output:
-                            json_output = json.loads(
-                                execution_result.output.strip())
-                            final_answer = json_output
-                    except (json.JSONDecodeError, AttributeError):
-                        # Keep as string if not valid JSON
+                            text = execution_result.output.strip()
+                            json_output = None
+                            try:
+                                json_output = json.loads(text)
+                            except Exception:
+                                # Try ast.literal_eval for Python reprs
+                                try:
+                                    json_output = ast.literal_eval(text)
+                                except Exception:
+                                    json_output = None
+
+                            if json_output is not None:
+                                # Convert numpy/pandas types recursively
+                                converted = convert_numpy_types(json_output)
+                                final_answer = converted
+                            else:
+                                # If not JSON, keep the raw text but attempt conversion for common reprs
+                                final_answer = convert_numpy_types(text)
+                    except Exception as e:
+                        logfire.warn(
+                            "Final answer parsing/conversion failed", error=str(e))
                         final_answer = execution_result.output
 
                     return {
@@ -433,17 +588,6 @@ Generate the corrected Python code.
         # All attempts failed
         logfire.error("All answer generation attempts failed")
 
-        # As a last resort, perform a single SerpAPI Google AI Overview search using the user's request
-        # to surface potential answers from Google's AI Overview. This will only be attempted once.
-        serp_ai_overview = None
-        try:
-            serp_ai_overview = google_ai_overview_search(data_analysis_input)
-            if serp_ai_overview:
-                logfire.info(
-                    "Fetched Google AI Overview via SerpAPI as a fallback")
-        except Exception as e:
-            logfire.warn("Fallback SerpAPI search failed", error=str(e))
-
         return {
             "status": "error",
             "final_answer": None,
@@ -452,5 +596,4 @@ Generate the corrected Python code.
             "attempts_used": max_attempts,
             "error_message": "All code generation attempts failed",
             "processing_summary": f"Failed after {max_attempts} attempts",
-            "serp_ai_overview": serp_ai_overview,
         }

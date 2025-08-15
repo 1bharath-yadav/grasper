@@ -63,7 +63,7 @@ async def handle_payload_and_response(payload: Dict[str, Any]) -> Any:
             logfire.info("Orchestrator returned non-dict response")
 
         # if successful, cleanup temp dir
-        # await cleanup_temp_dir(tmp_dir)
+        await cleanup_temp_dir(tmp_dir)
 
         logfire.info("Returning orchestrator response to client")
         return orchestrato_response

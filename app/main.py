@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logfire
+import os
 
 from app.routes import router  # Your custom routes
-from app.config import API_HOST, API_PORT
+from app.config import API_HOST, API_PORT, ENVIRONMENT
 
 # Configure Logfire
 logfire.configure()
@@ -19,9 +20,11 @@ app = FastAPI(
 logfire.instrument_fastapi(app)
 
 # CORS setup (you can customize allowed origins)
+# Use FRONTEND_ORIGINS env var (comma-separated) or default to localhost:800 and localhost:8000
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to specific domains in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
