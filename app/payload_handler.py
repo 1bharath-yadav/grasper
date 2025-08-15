@@ -46,24 +46,25 @@ async def handle_payload_and_response(payload: Dict[str, Any]) -> Any:
                 tmp_dir), file_count=len(uploaded_files_paths))
         else:
             logfire.info("No attachments provided")
-        orchestrato_response = await orchestrator(
+
+        orchestrator_response = await orchestrator(
             uploaded_files_paths=uploaded_files_paths,
             data_analysis_input=data_analyst_input,
             temp_dir=str(tmp_dir)
         )
         logfire.info("Orchestrator completed", response_type=type(
-            orchestrato_response).__name__)
+            orchestrator_response).__name__)
 
         # Log the response structure without sensitive data
-        if isinstance(orchestrato_response, dict):
+        if isinstance(orchestrator_response, dict):
             logfire.info("Orchestrator response structure",
-                         keys=list(orchestrato_response.keys()),
-                         status=orchestrato_response.get("status"))
+                         keys=list(orchestrator_response.keys()),
+                         status=orchestrator_response.get("status"))
         else:
             logfire.info("Orchestrator returned non-dict response")
 
         # if successful, cleanup temp dir
-        await cleanup_temp_dir(tmp_dir)
+        # await cleanup_temp_dir(tmp_dir)
 
         logfire.info("Returning orchestrator response to client")
-        return orchestrato_response
+        return orchestrator_response
