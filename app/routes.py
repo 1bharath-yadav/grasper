@@ -85,11 +85,17 @@ async def get_current_user_from_cookie(auth_token: Optional[str] = Cookie(None))
         raise HTTPException(
             status_code=401, detail=f"Authentication failed: {str(e)}")
 
-router = APIRouter()
+# Split routes into public and protected routers.
+public_router = APIRouter()
+protected_router = APIRouter(
+    dependencies=[Depends(get_current_user_from_cookie)])
 security = HTTPBearer()
 
+# Define a parent router to expose to main.py so existing include_router(..., prefix="/api") continues to work
+router = APIRouter()
 
-@router.post("/login", response_model=LoginResponse, tags=["Authentication"])
+
+@public_router.post("/login", response_model=LoginResponse, tags=["Authentication"])
 async def login(response: Response, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """
     Login with Google token and receive a JWT cookie for future requests
@@ -133,7 +139,7 @@ async def login(response: Response, credentials: HTTPAuthorizationCredentials = 
         raise HTTPException(status_code=401, detail=f"Login failed: {str(e)}")
 
 
-@router.post("/logout", tags=["Authentication"])
+@public_router.post("/logout", tags=["Authentication"])
 async def logout(response: Response):
     """
     Logout and clear authentication cookie
@@ -148,7 +154,7 @@ async def logout(response: Response):
     return {"message": "Logout successful"}
 
 
-@router.get("/me", response_model=UserInfo, tags=["Authentication"])
+@protected_router.get("/me", response_model=UserInfo, tags=["Authentication"])
 async def get_current_user(user_info: dict = Depends(get_current_user_from_cookie)):
     """Get current user information from cookie"""
     return UserInfo(
@@ -158,7 +164,7 @@ async def get_current_user(user_info: dict = Depends(get_current_user_from_cooki
     )
 
 
-@router.post("/set_api_key/", response_model=ApiKeyResponse, tags=["Configuration"])
+@public_router.post("/set_api_key/", response_model=ApiKeyResponse, tags=["Configuration"])
 async def set_api_key(request: ApiKeyRequest):
     """Set Gemini API key for a session"""
     try:
@@ -175,7 +181,7 @@ async def set_api_key(request: ApiKeyRequest):
         raise HTTPException(status_code=500, detail="Failed to set API key")
 
 
-@router.get("/api_key_status/{session_id}", tags=["Configuration"])
+@public_router.get("/api_key_status/{session_id}", tags=["Configuration"])
 async def get_api_key_status(session_id: str):
     """Check if API key is set for a session"""
     has_key = session_id in api_key_store
@@ -215,7 +221,7 @@ async def verify_google_token(credentials: HTTPAuthorizationCredentials = Depend
             status_code=401, detail=f"Invalid Google token: {str(e)}")
 
 
-@router.post("/analyze_data", tags=["Analysis"])
+@protected_router.post("/analyze_data", tags=["Analysis"])
 async def analyze_data(request: Request, user_info: dict = Depends(get_current_user_from_cookie)):
     """Handles the analysis request. Protected by JWT Cookie Authentication."""
     logfire.info("API request received", user_email=user_info.get("email"))
@@ -257,8 +263,8 @@ async def analyze_data(request: Request, user_info: dict = Depends(get_current_u
     return result
 
 
-# For official project submission
-@router.post("/hero_anand_sir", tags=["Analysis"])
+# For official project submission no authentications
+@public_router.post("/hero_anand_sir", tags=["Analysis"])
 async def analyze_unsecure_data(request: Request):
     logfire.info("API request received")
     form = await request.form()
@@ -299,3 +305,10 @@ async def analyze_unsecure_data(request: Request):
 
     logfire.info("API request completed", result_type=type(result).__name__)
     return result
+
+
+# Include sub-routers into the exported parent router. Public routes are available without cookie auth
+# Protected routes are created with a router-level dependency so they require the JWT cookie.  The
+# endpoint `/hero_anand_sir` remains on the public router (no auth) per request.
+router.include_router(public_router)
+router.include_router(protected_router)
