@@ -2,6 +2,7 @@
 Orchestrator Agent using Pydantic AI for coordinating data analysis workflows.
 """
 
+import json
 import re
 import asyncio
 import traceback
@@ -339,7 +340,7 @@ async def orchestrator(
                 return final_answer
             else:
                 logfire.info("Returning full result from answer generation")
-                return convert_numpy_types(final_result)
+                return json.dumps(convert_numpy_types(final_result))
 
         except Exception as e:
             logfire.error("Direct orchestration failed", error=str(e),
@@ -405,7 +406,7 @@ async def orchestrate_direct(
         if urls and has_html_question:
             logfire.info("Analyzing HTML content")
             try:
-                html_results = await analyze_html_async(urls[0], data_analysis_input, temp_dir)
+                html_results = await analyze_html_async(urls, data_analysis_input, temp_dir)
                 result["html_results"] = html_results
                 result["workflow_steps"].append("HTML Analysis - Success")
                 logfire.info("HTML analysis completed")

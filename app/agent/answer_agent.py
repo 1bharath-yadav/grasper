@@ -62,11 +62,7 @@ Code Requirements:
 - Include ALL necessary imports at the top
 - Use the provided temp directory for file operations
 - Convert final outputs to JSON serializable format
-- Handle missing or corrupted data gracefully
 - Output in the EXACT format requested by the user
-- Save intermediate results to temp directory if needed
-- Use robust parsing for CSV/Excel files with pandas
-- Include data validation and cleaning steps
 
 Never generate incomplete code or placeholder functions."""
 )
@@ -287,19 +283,12 @@ CONVERSATION HISTORY:
 
 REQUIREMENTS:
 1. Write complete, executable Python code
-2. Use the temp directory: {temp_dir}
 3. Include ALL necessary imports
 4. Answer ALL questions in the user request
 5. Output in the EXACT format requested by the user
 6. Handle file reading/writing properly
-7. Convert final results to JSON serializable format(use json.dumps())
-8. Include error handling for missing files or data issues
-9. If HTML data exists, read HTML files from temp_dir and analyze them
-10. Print the final results clearly
-
-
-
-The code should be production-ready and handle edge cases gracefully.
+7. If HTML data exists, read HTML files from temp_dir and analyze them
+8. Print the final results clearly
 """
             else:
                 # For retry attempts, include the previous error

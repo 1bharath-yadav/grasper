@@ -37,6 +37,8 @@ RUN chmod +x run.sh
 EXPOSE 7860
 EXPOSE 8501
 
+
+
 # Start the app
-ENTRYPOINT ["bash", "./run.sh"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
 
