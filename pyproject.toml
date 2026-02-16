@@ -1,0 +1,76 @@
+[project]
+name = "grasper"
+version = "0.1.0"
+description = "AI-powered data analysis agent with PydanticAI, DuckDB, and OpenAI Codex integration"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic-ai-slim[duckduckgo,google,mcp]",
+    "google-generativeai",
+    "duckdb",
+    "fastapi",
+    "uvicorn[standard]",
+    "pandas",
+    "numpy",
+    "playwright",
+    "httpx",
+    "aiofiles",
+    "asyncio-throttle",
+    "tenacity",
+    "loguru",
+    "python-multipart",
+    "python-magic",
+    "openpyxl",
+    "pyarrow",
+    "plotly",
+    "matplotlib",
+    "seaborn",
+    "scikit-learn",
+    "scipy",
+    "beautifulsoup4",
+    "lxml",
+    "pillow",
+    "polars",
+    "logfire[fastapi]",
+    "psutil",
+    "python-dotenv",
+    "boilerpy3>=1.0.7",
+    "networkx>=3.5",
+    "streamlit>=1.48.0",
+    "html5lib>=1.1",
+    "pytest>=8.4.1",
+    "chardet>=5.2.0",
+    "urlextract>=1.9.0",
+    "mcp>=1.12.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "black",
+    "ruff",
+    "mypy",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core", "agents", "api", "processors", "monitoring"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

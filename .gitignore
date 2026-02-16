@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv
+env/
+venv/
+ENV/
+*.sqlite3
+*.db
+
+# FastAPI/Uvicorn
+*.log
+logs/
+monitoring/logs/
+
+# Jupyter/IPython
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test/Temp files
+tmp/
+*.bak
+*.swp
+
+# Docker
+*.tar
+
+# Tableau
+*.twbx
+
+# Cache
+cache/
+
+# Python packaging
+dist/
+build/
+*.egg-info/
+
+
